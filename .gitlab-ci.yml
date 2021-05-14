@@ -1,0 +1,54 @@
+image: node:alpine
+
+stages:
+  - test
+  - release
+
+test:
+  stage: test
+  allow_failure: false
+  artifacts:
+    untracked: true
+  before_script:
+    - $([ -f .npmrc.install ]) && $([ -f .npmrc ] && cat .npmrc > .npmrc.bkp || cat /dev/null > .npmrc.bkp) && cat .npmrc.install >> .npmrc && rm yarn.lock
+  script:
+    - yarn install
+    - yarn run test --silent
+  after_script:
+    - apk update
+    - apk add jq
+    - $([ -f .npmrc.bkp ]) && cat .npmrc.bkp > .npmrc
+    - export GROUPNAME=$(jq -r .name package.json | grep -oEi  "@.*/" | cut -d@ -f2 | cut -d/ -f1)
+    - echo "@${GROUPNAME}:registry=${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/npm/" >> .npmrc
+  only:
+    - develop
+    - master
+
+publish-dev:
+  needs: [test]
+  allow_failure: false
+  dependencies: 
+    - test
+  stage: release
+  before_script:
+    - apk update
+    - apk add jq
+    - echo $(cat package.json | jq -r ".name = .name+\"-dev\" ") > package.json
+    - echo "${CI_API_V4_URL#https?}/projects/${CI_PROJECT_ID}/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> .npmrc
+  script:
+    - npm publish
+  only:
+    - develop
+
+publish:
+  needs: [test]
+  allow_failure: false
+  dependencies: 
+    - test
+  stage: release
+  before_script:
+    - echo "${CI_API_V4_URL#https?}/projects/${CI_PROJECT_ID}/packages/npm/:_authToken=${CI_JOB_TOKEN}" >> .npmrc
+  script:
+    - npm publish
+  only:
+    - master
